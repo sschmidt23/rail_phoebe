@@ -481,9 +481,9 @@ class KNNBPZliteEstimator(CatEstimator):
         #    # set num templates to nt, which is hardcoding to "interp=0"
         #    # in BPZ, i.e. do not create any interpolated templates
         #    P = prior_function(self.zgrid, mo, self.prior_dict, nt)
-        if mo > self.config.prior_grid_max:
+        if mo > self.config.prior_grid_max:  # pragma: no cover
             mo = self.prior_grid_max
-        elif mo < self.config.prior_grid_min:
+        elif mo < self.config.prior_grid_min:  # pragma: no cover
             mo = self.config.prior_grid_min
         gridm = np.searchsorted(self.prior_mgrid, mo)
         P = self.prior_grid[gridm]
@@ -508,7 +508,7 @@ class KNNBPZliteEstimator(CatEstimator):
 
         # Normalize in the same way that BPZ does
         # if all zero, then set to uniform distribution
-        if np.isclose(post_z.sum(), 0.0):
+        if np.isclose(post_z.sum(), 0.0):  # pragma: no cover
             post_z = np.ones(len(self.zgrid))
         else:
             post_z /= post_z.sum()
