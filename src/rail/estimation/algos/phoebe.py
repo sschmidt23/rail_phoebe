@@ -22,10 +22,8 @@ Missing from full BPZ:
 import os
 import numpy as np
 # import pandas as pd
-import scipy.integrate
 import glob
 import qp
-import tables_io
 from ceci.config import StageParameter as Param
 from rail.estimation.estimator import CatEstimator, CatInformer
 from rail.utils.path_utils import RAILDIR
@@ -92,7 +90,7 @@ class KNNBPZliteInformer(CatInformer):
         """Init function, init config stuff
         """
         super().__init__(args, **kwargs)
-        
+
         self.mags = None
         self.szs = None
         datapath = self.config["data_path"]
@@ -105,7 +103,6 @@ class KNNBPZliteInformer(CatInformer):
             os.environ["BPZDATAPATH"] = self.data_path
         if not os.path.exists(self.data_path):  # pragma: no cover
             raise FileNotFoundError("BPZDATAPATH " + self.data_path + " does not exist! Check value of data_path in config file!")
-
 
     def _initialize_run(self):
         super()._initialize_run()
@@ -155,13 +152,13 @@ class KNNBPZliteInformer(CatInformer):
         nf = len(filters)
         nz = len(z)
         zint = np.arange(nz)
-        flux_templates = np.zeros((nz*nt, nf))
-        template_redshifts = np.zeros(nz*nt, dtype=int)
-        template_types = np.zeros(nz*nt, dtype=int)
+        flux_templates = np.zeros((nz * nt, nf))
+        template_redshifts = np.zeros(nz * nt, dtype=int)
+        template_types = np.zeros(nz * nt, dtype=int)
         self.nt = nt
         self.nf = nf
         self.nz = nz
-        
+
         ab_dir = os.path.join(data_path, "AB")
         os.makedirs(ab_dir, exist_ok=True)
 
@@ -171,7 +168,7 @@ class KNNBPZliteInformer(CatInformer):
 
         for i, s in enumerate(spectra):
             lowid = nz * i
-            hiid = nz * (i+1)
+            hiid = nz * (i + 1)
             template_redshifts[lowid:hiid] = zint
             template_types[lowid:hiid] = np.repeat(i, nz)
             for j, f in enumerate(filters):
@@ -184,29 +181,32 @@ class KNNBPZliteInformer(CatInformer):
 
         return flux_templates, template_redshifts, template_types
 
-
     def run(self):
         """compute the best fit prior parameters
         """
 
         self.allfluxes, self.template_redshifts, self.template_types = self._load_templates()
-        self.allcolors = np.zeros([self.nz*self.nt, self.nf])
+        self.allcolors = np.zeros([self.nz * self.nt, self.nf])
         # find position of ref_band:
         iref = self.config.bands.index(self.config.ref_band)
         for i in range(self.nf):
-            self.allcolors[:,i] = -2.5 * np.log10(self.allfluxes[:,i] / self.allfluxes[:,iref])
+            self.allcolors[:, i] = -2.5 * np.log10(self.allfluxes[:, i] / self.allfluxes[:, iref])
 
         # train kd-tree on colors
         colortree = KDTree(self.allcolors, leaf_size=self.config.leaf_size)
 
-        self.model=dict(allfluxes=self.allfluxes, allcolors=self.allcolors, nz=self.nz, nt=self.nt,
-                        nf=self.nf, colortree=colortree, template_redshifts=self.template_redshifts,
-                        template_types=self.template_types, zmin=self.config.zmin,
-                        zmax=self.config.zmax, nzbins=self.config.nzbins,
-                        spectra_file=self.config.spectra_file)
+        self.model = dict(allfluxes=self.allfluxes, allcolors=self.allcolors,
+                          nz=self.nz, nt=self.nt,
+                          nf=self.nf, colortree=colortree,
+                          template_redshifts=self.template_redshifts,
+                          template_types=self.template_types,
+                          zmin=self.config.zmin,
+                          zmax=self.config.zmax,
+                          nzbins=self.config.nzbins,
+                          spectra_file=self.config.spectra_file)
         self.add_data("model", self.model)
 
-        
+
 class KNNBPZliteEstimator(CatEstimator):
     """CatEstimator subclass to implement basic marginalized PDF for BPZ
     In addition to the marginalized redshift PDF, we also compute several
@@ -300,13 +300,13 @@ class KNNBPZliteEstimator(CatEstimator):
 
     def _make_prior_grid(self):
         from desc_bpz.prior_from_dict import prior_function
-        self.prior_mgrid = np.arange(self.config.prior_grid_min, self.config.prior_grid_max+self.config.prior_grid_dm, self.config.prior_grid_dm)
+        self.prior_mgrid = np.arange(self.config.prior_grid_min, self.config.prior_grid_max + self.config.prior_grid_dm, self.config.prior_grid_dm)
         nm = len(self.prior_mgrid)
         ntot = np.sum(self.config.prior_nt)
         self.prior_grid = np.zeros([nm, self.nz, self.nt])
         for ii, mm in enumerate(self.prior_mgrid):
             self.prior_grid[ii] = prior_function(self.zgrid, mm, self.prior_dict, ntot)
-    
+
     def _initialize_run(self):
         super()._initialize_run()
 
@@ -356,7 +356,7 @@ class KNNBPZliteEstimator(CatEstimator):
         fluxdict = {}
         nchunk = len(data[self.config.ref_band])
         chunkcolors = np.zeros([nchunk, self.nf])
-        
+
         # Load the magnitudes
         zp_frac = e_mag2frac(np.array(self.config.zp_errors))
 
@@ -367,7 +367,7 @@ class KNNBPZliteEstimator(CatEstimator):
                 detmask = np.isnan(data[bandname])
             else:
                 detmask = np.isclose(data[bandname], self.config.nondetect_val)
-            
+
             data[bandname][detmask] = self.config.mag_limits[bandname]
             data[errname][detmask] = self.config.mag_limits[bandname]
             chunkcolors[:, ii] = data[bandname] - data[self.config.ref_band]
@@ -427,22 +427,22 @@ class KNNBPZliteEstimator(CatEstimator):
 
     def _calculate_likelihood(self, f, ef, ft_z, t_szs, t_types):
         # and adaptation of the bits of p_c_z_t from bpz_tools_py3 that do the likelihood
-        eps=1e-300
-        eeps=np.log(eps)
+        eps = 1e-300
+        eeps = np.log(eps)
         xnz, xnt, xnf = ft_z.shape
-        foo=np.add.reduce(np.where(np.less(f/ef,1e-4),0.,(f/ef)**2))
-        nonobs=np.greater(np.reshape(ef, (1, 1, xnf)) + ft_z*0., 1.0)
-        fot=np.add.reduce(np.where(nonobs,0.,np.reshape(f, (1, self.nf)) * ft_z / np.reshape(ef, (1, self.nf))**2), -1)
-        ftt=np.add.reduce(np.where(nonobs,0.,ft_z**2 / np.reshape(ef, (1, self.nf))**2), -1)
-        chi2=np.where(np.equal(ftt,0.), foo, foo-(fot**2)/(ftt+eps)).flatten()
+        foo=np.add.reduce(np.where(np.less(f / ef, 1e-4), 0., (f / ef)**2))
+        nonobs=np.greater(np.reshape(ef, (1, 1, xnf)) + ft_z * 0., 1.0)
+        fot=np.add.reduce(np.where(nonobs, 0., np.reshape(f, (1, self.nf)) * ft_z / np.reshape(ef, (1, self.nf))**2), -1)
+        ftt=np.add.reduce(np.where(nonobs, 0., ft_z**2 / np.reshape(ef, (1, self.nf))**2), -1)
+        chi2 = np.where(np.equal(ftt, 0.), foo, foo - (fot**2) / (ftt + eps)).flatten()
         # we now have a 1D array, don't need this search
-        #chi2_minima=np.loc2d(chi2[:xnz,:xnt],'min')
+        # chi2_minima=np.loc2d(chi2[:xnz,:xnt],'min')
         chi2_minima_pos = np.argmin(chi2)
         # i_z_ml=int(chi2_minima_pos)
         # i_t_ml=int(chi2_minima)
         # min_chi2=self.chi2[self.i_z_ml,self.i_t_ml]
         min_chi2 = chi2[chi2_minima_pos]
-        likelihood = np.exp(-0.5*np.clip((chi2-min_chi2),0.,-2*eeps))
+        likelihood = np.exp(-0.5 * np.clip((chi2 - min_chi2), 0., -2 * eeps))
         # this is just a set of likelihoods for NN points, need to put on a grid
         likegrid = np.zeros([self.nz, self.nt])
         for ii, like in enumerate(likelihood):
@@ -450,14 +450,14 @@ class KNNBPZliteEstimator(CatEstimator):
         return likegrid
 
     def _estimate_pdf(self, flux_templates, kernel, flux, flux_err, galcolor, mo):
-        #from desc_bpz.prior_from_dict import prior_function
+        # from desc_bpz.prior_from_dict import prior_function
 
-        eps=1e-300
-        #priordict = self._assemble_prior_dict()
-        
-        #modeldict = self.modeldict
+        eps = 1e-300
+        # priordict = self._assemble_prior_dict()
+
+        # modeldict = self.modeldict
         p_min = self.config.p_min
-        nt = flux_templates.shape[1]
+        # nt = flux_templates.shape[1]
 
         # use kdtree to find closest neighbors!
         dists, idxs = self.colortree.query(np.atleast_2d(galcolor), k=self.config.n_neigh)
@@ -465,29 +465,29 @@ class KNNBPZliteEstimator(CatEstimator):
         knnfluxes = flux_templates[idxs]
         knnredshifts = self.template_redshifts[idxs].ravel()
         knntypes = self.template_types[idxs].ravel()
-        
+
         # The likelihood and prior...
-        #pczt = p_c_z_t(flux, flux_err, flux_templates)
-        #L = pczt.likelihood
+        # pczt = p_c_z_t(flux, flux_err, flux_templates)
+        # L = pczt.likelihood
 
         # New likelihood calculation
         L = self._calculate_likelihood(flux, flux_err, knnfluxes, knnredshifts, knntypes)
 
-        ## old prior code returns NoneType for prior if "flat" or "none"
-        ## just hard code the no prior case for now for backward compatibility
-        #if self.config.no_prior:  # pragma: no cover
-        #    P = np.ones(L.shape)
-        #else:
-        #    # set num templates to nt, which is hardcoding to "interp=0"
-        #    # in BPZ, i.e. do not create any interpolated templates
-        #    P = prior_function(self.zgrid, mo, self.prior_dict, nt)
+        # # old prior code returns NoneType for prior if "flat" or "none"
+        # # just hard code the no prior case for now for backward compatibility
+        # if self.config.no_prior:  # pragma: no cover
+        #     P = np.ones(L.shape)
+        # else:
+        #     # set num templates to nt, which is hardcoding to "interp=0"
+        #     # in BPZ, i.e. do not create any interpolated templates
+        #     P = prior_function(self.zgrid, mo, self.prior_dict, nt)
         if mo > self.config.prior_grid_max:  # pragma: no cover
             mo = self.prior_grid_max
         elif mo < self.config.prior_grid_min:  # pragma: no cover
             mo = self.config.prior_grid_min
         gridm = np.searchsorted(self.prior_mgrid, mo)
         P = self.prior_grid[gridm]
-        
+
         post = L * P
         # Right now we jave the joint PDF of p(z,template). Marginalize
         # over the templates to just get p(z)
@@ -533,7 +533,7 @@ class KNNBPZliteEstimator(CatEstimator):
         # replace non-detects, traditional BPZ had nondet=99 and err = maglim
         # put in that format here
         test_data, test_colors = self._preprocess_magnitudes(data)
-        m_0_col = self.config.bands.index(self.config.ref_band)
+        # m_0_col = self.config.bands.index(self.config.ref_band)
 
         nz = self.nz
         ng = test_data['flux'].shape[0]
