@@ -19,6 +19,7 @@ Missing from full BPZ:
 
 """
 
+from astropy.cosmology import FlatLambdaCDM
 import os
 import numpy as np
 # import pandas as pd
@@ -29,6 +30,7 @@ from rail.estimation.estimator import CatEstimator, CatInformer
 from rail.utils.path_utils import RAILDIR
 from rail.core.common_params import SHARED_PARAMS
 from sklearn.neighbors import KDTree
+import tables_io
 
 
 default_prior_a = [2.465, 1.806, 0.906]
@@ -147,6 +149,7 @@ class KNNBPZliteInformer(CatInformer):
 
         spectra_file = os.path.join(data_path, "SED", self.config.spectra_file)
         spectra = [s[:-4] for s in get_str(spectra_file)]
+        self.spectra = spectra
 
         nt = len(spectra)
         nf = len(filters)
@@ -203,7 +206,9 @@ class KNNBPZliteInformer(CatInformer):
                           zmin=self.config.zmin,
                           zmax=self.config.zmax,
                           nzbins=self.config.nzbins,
-                          spectra_file=self.config.spectra_file)
+                          spectra_file=self.config.spectra_file,
+                          spectra=self.spectra)
+
         self.add_data("model", self.model)
 
 
@@ -256,7 +261,13 @@ class KNNBPZliteEstimator(CatEstimator):
                           n_neigh=Param(int, 100, msg="number of neighbors kept in KD Tree"),
                           prior_grid_min=Param(float, 20.0, msg="value of lowest value of prior grid"),
                           prior_grid_max=Param(float, 25.5, msg="value of highest value for prior grid"),
-                          prior_grid_dm=Param(float, 0.05, msg="delta mag for prior, grid"))
+                          prior_grid_dm=Param(float, 0.05, msg="delta mag for prior, grid"),
+                          abs_mag_filt=Param(str, "DC2LSST_i", msg="name of absolute magnitude filter"),
+                          ref_filt=Param(str, "DC2LSST_i", msg="name of reference filter file"),
+                          compute_abs_mag_files=Param(bool, False, msg="if True, generates abs mag files"),
+                          abs_mag_ho=Param(float, 70.0, msg="H0 value for abs mag computation"),
+                          abs_mag_omo=Param(float, 0.0, msg="omega 0 value for abs mag computation via astropy"),
+                          )
 
     def __init__(self, args, **kwargs):
         """Constructor, build the CatEstimator, then do BPZ specific setup
@@ -307,9 +318,60 @@ class KNNBPZliteEstimator(CatEstimator):
         for ii, mm in enumerate(self.prior_mgrid):
             self.prior_grid[ii] = prior_function(self.zgrid, mm, self.prior_dict, ntot)
 
+    def _create_physical_param_arrays(self):
+        basepath = os.environ["BPZDATAPATH"]
+        cosmo = FlatLambdaCDM(H0=self.config.abs_mag_ho, Om0=self.config.abs_mag_omo)
+        teeny = 1.e-128
+        nspec = len(self.spectra)
+        for ii, spec in enumerate(self.spectra):  # loop over each spectrum file:
+            ref_abfile = os.path.join(basepath, "AB", f"{spec}.{self.config.ref_filt}.AB")
+            abs_abfile = os.path.join(basepath, "AB", f"{spec}.{self.config.abs_mag_filt}.AB")
+            refdata = np.loadtxt(ref_abfile)
+            refz = refdata[:, 0]
+            zlen = len(refz)
+            if ii == 0:
+                self.distmods = np.zeros([nspec, zlen])
+                self.kcors = np.zeros([nspec, zlen])
+                self.distz = refz
+            distmod = np.zeros_like(refz)
+            stelmass = np.zeros_like(refz)
+            kcor = np.zeros_like(refz)
+            reffl = refdata[:, 1]
+            absz0fl = np.loadtxt(abs_abfile)[0, 1]
+            for jj, zz in enumerate(refz):
+                lumd = cosmo.luminosity_distance(zz).value  # default is in Mpc
+                kcor[jj] = -2.5 * np.log10((reffl[jj] + teeny) / absz0fl) + 2.5 * np.log10(1. + refz[jj])
+                distmod[jj] = -5. * np.log10((lumd + teeny) * 1_000_000) + 5. + kcor[jj]
+                stelmass[jj] = 1.0  # placeholder
+            self.distmods[ii, :] = distmod
+            self.kcors[ii, :] = kcor
+            # at some point, it may make sense to write stuff out, but given the many combos of filter
+            # and SED, and that it's fairly fast, for not just compute every time and leave in memory
+            #
+            # phys_path = os.path.join(basepath, "PHYSICAL")
+            # physdict = dict(redshift=refz, kcor=kcor, distmod=distmod, stellar_mass=stelmass)
+            # tmpfile = os.path.join(phys_path, f"{spec}_physicalparams")
+            # tables_io.write(physdict, tmpfile, "hdf5")
+
+    def _load_physical_param_files(self):  # pragma: no cover
+        # if I eventually write out files, this will read in the necessary data
+        # but for now, just compute in _create_physical_param_arrays
+        basepath = os.environ["BPZDATAPATH"]
+        phys_path = os.path.join(basepath, "PHYSICAL")
+        nspec = len(self.spectra)
+        for ii, spec in enumerate(self.spectra):  # loop over each spectrum file:
+            tmpfile = os.path.join(phys_path, f"{spec}_physicalparams")
+            tmpdata = tables_io.read(tmpfile)
+            tmpz = tmpdata["redshift"]
+            tmpdist = tmpdata["distmod"]
+            tmpmass = tmpdata["stellar_mass"]
+            if ii == 0:
+                self.distmods = np.zeros([nspec, len(tmpz)])
+                self.distz = tmpz
+            self.distmods[ii, :] = tmpdist
+
     def _initialize_run(self):
         super()._initialize_run()
-
         # If we are not the root process then we wait for
         # the root to (potentially) create all the templates before
         # reading them ourselves.
@@ -324,6 +386,15 @@ class KNNBPZliteEstimator(CatEstimator):
         # which will allow the other processes to continue
         else:
             self.flux_templates = self.allfluxes
+
+            # create absolute mag arrays if flag is set
+            if self.config.compute_abs_mag_files:
+                print("creating physical quantity files")
+                self._create_physical_param_arrays()
+            else:  # pragma: no cover
+                # if I write to files later, put a bit to loading here...
+                raise ValueError("NOTE: currently the code will not run with compute_abs_mag_files set to False")
+
             # We might only be running in serial, so check.
             # If we are running MPI, then now we have created
             # the templates we let all the other processes that
@@ -346,6 +417,8 @@ class KNNBPZliteEstimator(CatEstimator):
         self.zmax = self.model['zmax']
         self.nzbins = self.model['nzbins']
         self.zgrid = np.linspace(self.zmin, self.zmax, self.nzbins)
+        self.spectra_file = self.model['spectra_file']
+        self.spectra = self.model['spectra']
 
     def _preprocess_magnitudes(self, data):
         from desc_bpz.bpz_tools_py3 import e_mag2frac
@@ -517,12 +590,16 @@ class KNNBPZliteEstimator(CatEstimator):
         tmode = post[zpos, :]
         t_b = np.argmax(tmode)
 
+        # look up distmod
+        zind = np.searchsorted(self.distz, zmode)
+        dmod = self.distmods[t_b, zind]
+
         # compute TODDS, the fraction of probability of the "best" template
         # relative to the other templates
         tmarg = post.sum(axis=0)
         todds = tmarg[t_b] / (np.sum(tmarg) + eps)
 
-        return post_z, zmode, t_b, todds
+        return post_z, zmode, t_b, todds, dmod
 
     def _process_chunk(self, start, end, data, first):
         """
@@ -552,6 +629,8 @@ class KNNBPZliteEstimator(CatEstimator):
         zmean = np.zeros(ng)
         tb = np.zeros(ng)
         todds = np.zeros(ng)
+        dmod = np.zeros(ng)
+        absmag = np.zeros(ng)
         flux_temps = self.allfluxes
         zgrid = self.zgrid
         # Loop over all ng galaxies!
@@ -560,11 +639,12 @@ class KNNBPZliteEstimator(CatEstimator):
             flux = test_data['flux'][i]
             flux_err = test_data['flux_err'][i]
             galcolor = test_colors[i]
-            pdfs[i], zmode[i], tb[i], todds[i] = self._estimate_pdf(flux_temps,
-                                                                    kernel, flux,
-                                                                    flux_err,
-                                                                    galcolor, mag_0)
+            pdfs[i], zmode[i], tb[i], todds[i], dmod[i] = self._estimate_pdf(flux_temps,
+                                                                             kernel, flux,
+                                                                             flux_err,
+                                                                             galcolor, mag_0)
             zmean[i] = (zgrid * pdfs[i]).sum() / pdfs[i].sum()
+            absmag[i] = mag_0 + dmod[i]
         qp_dstn = qp.Ensemble(qp.interp, data=dict(xvals=self.zgrid, yvals=pdfs))
-        qp_dstn.set_ancil(dict(zmode=zmode, zmean=zmean, tb=tb, todds=todds))
+        qp_dstn.set_ancil(dict(zmode=zmode, zmean=zmean, tb=tb, todds=todds, absmag=absmag))
         self._do_chunk_output(qp_dstn, start, end, first, data=data)

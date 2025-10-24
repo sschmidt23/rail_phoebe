@@ -17,6 +17,7 @@ classifiers = [
 dynamic = ["version"]
 
 dependencies = [
+    "astropy",
     "desc-bpz",
     "pz-rail-base>=1.1.4",
     "qp-prob[full]",
