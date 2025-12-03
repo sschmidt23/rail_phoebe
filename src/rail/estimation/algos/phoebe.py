@@ -534,6 +534,7 @@ class KNNBPZliteEstimator(CatEstimator):
 
         # use kdtree to find closest neighbors!
         dists, idxs = self.colortree.query(np.atleast_2d(galcolor), k=self.config.n_neigh)
+        kthdist = dists.flatten()[self.config.n_neigh - 1]
         # pull out subsets of model fluxes that are matches
         knnfluxes = flux_templates[idxs]
         knnredshifts = self.template_redshifts[idxs].ravel()
@@ -599,7 +600,7 @@ class KNNBPZliteEstimator(CatEstimator):
         tmarg = post.sum(axis=0)
         todds = tmarg[t_b] / (np.sum(tmarg) + eps)
 
-        return post_z, zmode, t_b, todds, dmod
+        return post_z, zmode, t_b, todds, dmod, kthdist
 
     def _process_chunk(self, start, end, data, first):
         """
@@ -631,6 +632,7 @@ class KNNBPZliteEstimator(CatEstimator):
         todds = np.zeros(ng)
         dmod = np.zeros(ng)
         absmag = np.zeros(ng)
+        kthdist = np.zeros(ng)
         flux_temps = self.allfluxes
         zgrid = self.zgrid
         # Loop over all ng galaxies!
@@ -639,12 +641,14 @@ class KNNBPZliteEstimator(CatEstimator):
             flux = test_data['flux'][i]
             flux_err = test_data['flux_err'][i]
             galcolor = test_colors[i]
-            pdfs[i], zmode[i], tb[i], todds[i], dmod[i] = self._estimate_pdf(flux_temps,
-                                                                             kernel, flux,
-                                                                             flux_err,
-                                                                             galcolor, mag_0)
+            pdfs[i], zmode[i], tb[i], todds[i], dmod[i], kthdist[i] = self._estimate_pdf(flux_temps,
+                                                                                         kernel,
+                                                                                         flux,
+                                                                                         flux_err,
+                                                                                         galcolor,
+                                                                                         mag_0)
             zmean[i] = (zgrid * pdfs[i]).sum() / pdfs[i].sum()
             absmag[i] = mag_0 + dmod[i]
         qp_dstn = qp.Ensemble(qp.interp, data=dict(xvals=self.zgrid, yvals=pdfs))
-        qp_dstn.set_ancil(dict(zmode=zmode, zmean=zmean, tb=tb, todds=todds, absmag=absmag))
+        qp_dstn.set_ancil(dict(zmode=zmode, zmean=zmean, tb=tb, todds=todds, absmag=absmag, kthdist=kthdist))
         self._do_chunk_output(qp_dstn, start, end, first, data=data)
