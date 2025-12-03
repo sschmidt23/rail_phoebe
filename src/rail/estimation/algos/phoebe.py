@@ -42,7 +42,7 @@ default_prior_nt = [1, 2, 5]
 # prior_nt for cosmos136 is [7, 57, 72]
 
 
-class KNNBPZliteInformer(CatInformer):
+class BPZPhoebeInformer(CatInformer):
     """Inform stage for BPZliteEstimator, this stage *assumes* that you have a set of
     SED templates and that the training data has already been assigned a
     'best fit broad type' (that is, something like ellliptical, spiral,
@@ -67,7 +67,7 @@ class KNNBPZliteInformer(CatInformer):
     z0, km, and a for each type.  These parameters are then fed to the BPZ
     prior for use in the estimation stage.
     """
-    name = "KNNBPZliteInformer"
+    name = "BPZPhoebeInformer"
     config_options = CatInformer.config_options.copy()
     config_options.update(zmin=SHARED_PARAMS,
                           zmax=SHARED_PARAMS,
@@ -212,7 +212,7 @@ class KNNBPZliteInformer(CatInformer):
         self.add_data("model", self.model)
 
 
-class KNNBPZliteEstimator(CatEstimator):
+class BPZPhoebeEstimator(CatEstimator):
     """CatEstimator subclass to implement basic marginalized PDF for BPZ
     In addition to the marginalized redshift PDF, we also compute several
     ancillary quantities that will be stored in the ensemble ancil data:
@@ -223,7 +223,7 @@ class KNNBPZliteEstimator(CatEstimator):
     so lower numbers mean other templates could be better fits, likely
     at other redshifts
     """
-    name = "KNNBPZliteEstimator"
+    name = "BPZPhoebeEstimator"
     config_options = CatEstimator.config_options.copy()
     config_options.update(nondetect_val=SHARED_PARAMS,
                           mag_limits=SHARED_PARAMS,
@@ -264,7 +264,7 @@ class KNNBPZliteEstimator(CatEstimator):
                           prior_grid_dm=Param(float, 0.05, msg="delta mag for prior, grid"),
                           abs_mag_filt=Param(str, "DC2LSST_i", msg="name of absolute magnitude filter"),
                           ref_filt=Param(str, "DC2LSST_i", msg="name of reference filter file"),
-                          compute_abs_mag_files=Param(bool, False, msg="if True, generates abs mag files"),
+                          compute_abs_mag_files=Param(bool, True, msg="if True, generates abs mag files"),
                           abs_mag_ho=Param(float, 70.0, msg="H0 value for abs mag computation"),
                           abs_mag_omo=Param(float, 0.0, msg="omega 0 value for abs mag computation via astropy"),
                           )
@@ -650,5 +650,5 @@ class KNNBPZliteEstimator(CatEstimator):
             zmean[i] = (zgrid * pdfs[i]).sum() / pdfs[i].sum()
             absmag[i] = mag_0 + dmod[i]
         qp_dstn = qp.Ensemble(qp.interp, data=dict(xvals=self.zgrid, yvals=pdfs))
-        qp_dstn.set_ancil(dict(zmode=zmode, zmean=zmean, tb=tb, todds=todds, absmag=absmag, kthdist=kthdist))
+        qp_dstn.set_ancil(dict(zmode=zmode, zmean=zmean, tb=tb, todds=todds, distmod=dmod, absmag=absmag, kthdist=kthdist))
         self._do_chunk_output(qp_dstn, start, end, first, data=data)

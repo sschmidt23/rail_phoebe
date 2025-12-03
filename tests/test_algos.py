@@ -24,11 +24,11 @@ DS.__class__.allow_overwrite = True
      ([4, 4], traindata, "photometry", 100),
      ([8], fitsdata, "", 10),]
 )
-def test_bpz_train(ntarray, inputdata, groupname, size):
+def test_phoebe_train(ntarray, inputdata, groupname, size):
     # first, train with two broad types
     train_config_dict = {'zmin': 0.0, 'zmax': 3.0, 'dz': 0.01, 'hdf5_groupname': groupname,
                          'model': 'testmodel_bpz.pkl'}
-    train_algo = phoebe.KNNBPZliteInformer
+    train_algo = phoebe.BPZPhoebeInformer
     DS.clear()
     training_data = DS.read_file('training_data', TableHandle, inputdata)
     train_stage = train_algo.make_stage(**train_config_dict)
@@ -54,7 +54,7 @@ def test_phoebe():
                          'nt_array': [1, 2, 5],
                          'model': 'testmodel_bpz.pkl'}
     train_algo = None
-    pz_algo = phoebe.KNNBPZliteEstimator
+    pz_algo = phoebe.BPZPhoebeEstimator
     results, rerun_results, rerun3_results = one_algo("BPZ_lite", train_algo, pz_algo, train_config_dict, estim_config_dict)
     # assert np.isclose(results.ancil['zmode'], zb_expected, atol=0.03).all()
     assert np.isclose(results.ancil['zmode'], rerun_results.ancil['zmode']).all()
@@ -79,5 +79,5 @@ def test_wrong_number_of_filters():
                          'hdf5_groupname': 'photometry'}
     train_algo = None
     with pytest.raises(ValueError):
-        pz_algo = phoebe.KNNBPZliteEstimator
+        pz_algo = phoebe.BPZPhoebeEstimator
         _, _, _ = one_algo("BPZ_lite", train_algo, pz_algo, train_config_dict, estim_config_dict)
